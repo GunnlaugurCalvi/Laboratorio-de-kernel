@@ -1,1 +1,1 @@
-cmd_/root/src/Laboratorio-de-kernel/kernellab/kernellab.ko := ld -r -m elf_i386 -T ./scripts/module-common.lds --build-id  -o /root/src/Laboratorio-de-kernel/kernellab/kernellab.ko /root/src/Laboratorio-de-kernel/kernellab/kernellab.o /root/src/Laboratorio-de-kernel/kernellab/kernellab.mod.o
+cmd_/root/src/kernellab/kernellab.ko := ld -r -m elf_i386 -T ./scripts/module-common.lds --build-id  -o /root/src/kernellab/kernellab.ko /root/src/kernellab/kernellab.o /root/src/kernellab/kernellab.mod.o
