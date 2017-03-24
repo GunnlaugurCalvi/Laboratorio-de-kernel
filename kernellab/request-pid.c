@@ -67,7 +67,6 @@ void run_sysfs(void)
 	fd_all = open("/sys/kernel/kernellab/all_count", O_RDONLY);
 
 
-
 	read(fd_current, buf, sizeof(buf));
 	current_count = atoi(buf);
 
@@ -98,6 +97,8 @@ void run_sysfs(void)
 	all_count = atoi(buf);
 	
 	
+
+
 	printf("ANS: ALL_COUNT: %d\n", all_count);
 	printf("ANS: CURRENT_COUNT: %d\n", current_count);
 	printf("ANS: PID_COUNT: %d\n\n", pid_count);
@@ -109,6 +110,7 @@ void run_sysfs(void)
 	
 	ioctl(fd_dev_pid, RESET);
 	
+
 	read(fd_current, buf, sizeof(buf));
 	current_count = atoi(buf);
 
@@ -117,7 +119,7 @@ void run_sysfs(void)
 	
 	read(fd_all, buf, sizeof(buf));	
 	all_count = atoi(buf);
-		
+			
 	
 	printf("ANS: ALL_COUNT: %d\n", all_count);
 	printf("ANS: CURRENT_COUNT: %d\n", current_count);

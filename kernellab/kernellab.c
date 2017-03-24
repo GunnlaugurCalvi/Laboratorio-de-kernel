@@ -11,7 +11,7 @@
 #include <linux/sched.h>        /* task_struct */
 #include <linux/uaccess.h>      /* copy_to_user copy_from_user */
 #include <linux/semaphore.h>    /* semaphore support */
-
+#include <linux/thread_info.h>	/* use current in struct ADDED*/
 #include <linux/kobject.h>      /* kobject support */
 #include <linux/string.h>       /* similar to string.h */
 #include <linux/sysfs.h>        /* sysfs support */
@@ -23,13 +23,10 @@
 
 
 struct kernellab_dev {
-	int                     open_count;     /* number of times opened */
+	int                     counter;  	/* number of times opened */
 	struct semaphore        sem;            /* mutual exclusion semaphore */
 	struct cdev             cdev;           /* Char device structure */
-
-
-	/* Your code here */
-	int 			minor;
+	int 			minor;		/*Kernellab1 or Kernellab2*/
 	
 };
 
@@ -47,13 +44,8 @@ static int all_count;
  */
 static ssize_t kernellab_current_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
-{
-
-
-	/* Your code here */
-	
-
-  	return 0;
+{ 
+	return sprintf(buf, "%d\n", current_count); 
 }
 
 static struct kobj_attribute kernellab_current_count_attribute =
@@ -62,13 +54,9 @@ static struct kobj_attribute kernellab_current_count_attribute =
 static ssize_t kernellab_pid_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-
-
-	/* Your code here */
-
-
-  	return 0;
+	return sprintf(buf, "%d\n", pid_count);
 }
+
 
 static struct kobj_attribute kernellab_pid_count_attribute =
 	__ATTR(pid_count, 0440, kernellab_pid_count, NULL);
@@ -76,12 +64,19 @@ static struct kobj_attribute kernellab_pid_count_attribute =
 static ssize_t kernellab_all_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
+	
+	down(&kernellab_device->sem);	
+	if(strcmp(attr->attr.name, "current_count") == 0){
+		kernellab_device->counter  += current_count;	
+	}
+	else{
+		all_count  += pid_count;
+		all_count += current_count;
+	}
 
+	up(&kernellab_device->sem);	
 
-	/* Your code here */
-
-
-  	return 0;
+  	return sprintf(buf, "%d\n", all_count);
 }
 
 static struct kobj_attribute kernellab_all_count_attribute =
@@ -113,8 +108,17 @@ static int kernellab_open(struct inode *inode, struct file *filp)
 	dev = container_of(inode->i_cdev, struct kernellab_dev, cdev);
 	filp->private_data = dev; /* for other methods */
 
+	pr_info("kernellab: open(%d)\n", dev->minor);
 	
-	pr_info("kernellab: INJECTED\n");
+	down(&dev->sem);	
+	if(dev->minor == 1){
+	
+		current_count += 1;
+	}
+	else{
+		pid_count += 1;
+	}	
+	up(&dev->sem);
 
 	/* How to use the device semaphore */
 	if (down_interruptible(&dev->sem))
@@ -129,10 +133,8 @@ static int kernellab_open(struct inode *inode, struct file *filp)
 static int kernellab_release(struct inode *inode, struct file *filp)
 {
 	struct kernellab_dev *dev = filp->private_data;
-
 	
-	/* Your code here */
-
+	pr_info("kernellab: close(%d)\n", dev->minor);
 	
 	return 0;
 }
@@ -141,11 +143,21 @@ static long kernellab_ioctl(struct file *filp, unsigned int cmd,
 			    unsigned long arg)
 {
 	struct kernellab_dev *dev = filp->private_data;
+	
+	pr_info("kernellab: ioctl(%d)\n", dev->minor);
+	
+	down(&dev->sem);	
 
+	if(dev->minor == 1 && cmd == RESET){
+		current_count = 0;
+	}
+	else{
+		pid_count = 0;
+	}
 
-	/* Your code here */
-
-
+	all_count = 0;
+	
+	up(&dev->sem);
 	return -ENOIOCTLCMD;
 }
 
@@ -154,13 +166,19 @@ static ssize_t kernellab_read(struct file *filp, char __user *buf, size_t count,
 {
 	struct kernellab_dev *dev = filp->private_data;
 
+	int errno;
 
-	/* Your code here 
-	if(dev->minor  ==1
-	--
-	struct task_struct *task;
-	current->pid;*/
-	return -EFAULT;
+	pr_info("kernellab: read(%d)", dev->minor);	
+	
+	down(&dev->sem);		
+
+	if(copy_to_user(buf, &current->pid, sizeof(count))){
+		errno = -EFAULT;
+	}
+
+	up(&dev->sem);
+
+	return errno;
 }
 
 static ssize_t kernellab_write(struct file *filp, const char __user *buf,
@@ -168,11 +186,42 @@ static ssize_t kernellab_write(struct file *filp, const char __user *buf,
 {
 	struct kernellab_dev *dev = filp->private_data;
 
-
-	/* Your code here   read og write frekar eins*/
-
+	int errno;
 	
-	return -EFAULT;
+	struct task_struct *task;
+
+	struct kernellab_message message;
+
+	struct pid_info p_info;
+	
+	pr_info("kernellab: write(%d)\n", dev->minor);
+
+	down(&dev->sem);
+
+	if(dev->minor == 2){
+		if(copy_from_user(&message, buf, count)){
+			errno = -EFAULT;
+		}
+		if(copy_from_user(&p_info, message.address, sizeof(p_info))){
+			errno = -EFAULT;
+		}
+	
+		for_each_process(task){
+			if(task->pid == message.pid){
+				p_info.pid = task->pid;
+				strcpy(p_info.comm, task->comm);
+				p_info.state = task->state;
+			}
+		}
+	
+		if(copy_to_user(message.address, &p_info, sizeof(p_info))){
+			errno = -EFAULT;
+		}
+	}
+
+	up(&dev->sem);
+	
+	return errno;
 }
 
 static struct file_operations kernellab_fops = {
@@ -207,6 +256,7 @@ static int __init setup_devices(void)
 		dev = MKDEV(MAJOR(kl_dev), MINOR(kl_dev) + i);
 		sema_init(&kernellab_device[i].sem, 1);
 		cdev_init(&kernellab_device[i].cdev, &kernellab_fops);
+		kernellab_device[i].minor = i + 1; 	/* Initlize minor */
 		if ((err = cdev_add(&kernellab_device[i].cdev, dev, 1)) < 0)
 			return err;
 	}
@@ -216,7 +266,7 @@ static int __init setup_devices(void)
 static int __init kernellab_init(void)
 {
 	int err;
-
+	
 	if ((err = alloc_chrdev_region(&kl_dev, 0, nr_devs, "kernellab")) < 0)
 		goto out1;
 	if (IS_ERR(kl_class = class_create(THIS_MODULE, "sty16"))) {
@@ -232,10 +282,10 @@ static int __init kernellab_init(void)
 	if ((err = setup_devices()) < 0)
 		goto out3;
 	
-
-	/* Your code here */
-
-
+	
+	pr_info("kernellab: module INJECTED");
+		
+			
 	kernellab_kobj = kobject_create_and_add("kernellab", kernel_kobj);
 	if (!kernellab_kobj) {
 		err = -ENOMEM;
@@ -270,8 +320,7 @@ static void __exit kernellab_exit(void)
 	kobject_put(kernellab_kobj);
 
 	
-	/* Your code here */
-
+	pr_info("kernellab: module UNLOADED");
 	
 	kfree(kernellab_device);
 }
@@ -281,4 +330,4 @@ module_exit(kernellab_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Gunnlaugur Kristinn Hreidarsson <Gunnlaugur15@ru.is");
-MODULE_AUTHOR("Student Secondson <student14@ru.is");
+MODULE_AUTHOR("Hjalmar Orn Hannesson <Hjalmarh14@ru.is");
