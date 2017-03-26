@@ -11,7 +11,6 @@
 #include <linux/sched.h>        /* task_struct */
 #include <linux/uaccess.h>      /* copy_to_user copy_from_user */
 #include <linux/semaphore.h>    /* semaphore support */
-#include <linux/thread_info.h>	/* use current in struct ADDED*/
 #include <linux/kobject.h>      /* kobject support */
 #include <linux/string.h>       /* similar to string.h */
 #include <linux/sysfs.h>        /* sysfs support */
@@ -19,14 +18,14 @@
 #include <linux/device.h>       /* device and class information */
 
 #include "pidinfo.h"
-
+#include <linux/thread_info.h>	/* use current in struct ADDED*/
 
 
 struct kernellab_dev {
 	int                     counter;  	/* number of times opened */
 	struct semaphore        sem;            /* mutual exclusion semaphore */
 	struct cdev             cdev;           /* Char device structure */
-	int 			minor;		/*Kernellab1 or Kernellab2*/
+	int 			minor;		/* Kernellab1 or Kernellab2 */
 	
 };
 
@@ -45,7 +44,7 @@ static int all_count;
 static ssize_t kernellab_current_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 { 
-	return sprintf(buf, "%d\n", current_count); 
+	return sprintf(buf, "%d\n", current_count); /* print count of current pids */
 }
 
 static struct kobj_attribute kernellab_current_count_attribute =
@@ -54,7 +53,7 @@ static struct kobj_attribute kernellab_current_count_attribute =
 static ssize_t kernellab_pid_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", pid_count);
+	return sprintf(buf, "%d\n", pid_count); /* print count of pids */
 }
 
 
@@ -64,18 +63,18 @@ static struct kobj_attribute kernellab_pid_count_attribute =
 static ssize_t kernellab_all_count(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	
+
+	/* Sum up pid_count and current_count and put it in all_count variable. 
+ 	*  Put semaphores around it for saftey.	*/	
 	down(&kernellab_device->sem);	
 	if(strcmp(attr->attr.name, "current_count") == 0){
-		kernellab_device->counter  += current_count;	
+		all_count  += current_count;	
 	}
 	else{
 		all_count  += pid_count;
 		all_count += current_count;
 	}
-
 	up(&kernellab_device->sem);	
-
   	return sprintf(buf, "%d\n", all_count);
 }
 
@@ -108,11 +107,15 @@ static int kernellab_open(struct inode *inode, struct file *filp)
 	dev = container_of(inode->i_cdev, struct kernellab_dev, cdev);
 	filp->private_data = dev; /* for other methods */
 
+	/* Kernel device 1 or 2 is opened*/
 	pr_info("kernellab: open(%d)\n", dev->minor);
 	
+	/* Be careful to add 1 to the correct counter if it is
+ 	*  kernellab1 or kernellab2.
+ 	*  Semaphores around it for saftey. 	*/
 	down(&dev->sem);	
-	if(dev->minor == 1){
-	
+	if(dev->minor == 1){ 
+		
 		current_count += 1;
 	}
 	else{
@@ -133,7 +136,7 @@ static int kernellab_open(struct inode *inode, struct file *filp)
 static int kernellab_release(struct inode *inode, struct file *filp)
 {
 	struct kernellab_dev *dev = filp->private_data;
-	
+	/* Kernel device 1 or 2 is closed */	
 	pr_info("kernellab: close(%d)\n", dev->minor);
 	
 	return 0;
@@ -143,11 +146,13 @@ static long kernellab_ioctl(struct file *filp, unsigned int cmd,
 			    unsigned long arg)
 {
 	struct kernellab_dev *dev = filp->private_data;
-	
+	/* Kernel device 1 or 2 is reset */
 	pr_info("kernellab: ioctl(%d)\n", dev->minor);
-	
-	down(&dev->sem);	
 
+	/* Wanna catch when RESET is called in user space 
+ 	*  and put the counters back to square 1 (square 0).
+ 	*  Semaphores around it for safety*/	
+	down(&dev->sem);	
 	if(dev->minor == 1 && cmd == RESET){
 		current_count = 0;
 	}
@@ -167,9 +172,11 @@ static ssize_t kernellab_read(struct file *filp, char __user *buf, size_t count,
 	struct kernellab_dev *dev = filp->private_data;
 
 	int errno;
-
+	/* Kernel device 1 or 2 is red */
 	pr_info("kernellab: read(%d)", dev->minor);	
 	
+	/* copy_to_user to get the current pid in user space. 
+ 	* Put semaphores around it for safety.	*/
 	down(&dev->sem);		
 
 	if(copy_to_user(buf, &current->pid, sizeof(count))){
@@ -194,11 +201,19 @@ static ssize_t kernellab_write(struct file *filp, const char __user *buf,
 
 	struct pid_info p_info;
 	
+	/* Kernel device 1 or 2 is writed*/
 	pr_info("kernellab: write(%d)\n", dev->minor);
 
+	/* Iff it is kernel device number 2
+ 	*  copy_from_user to get the sysfs struct message to kernel space
+ 	*  if the task pid is the same as message pid we got our pid 
+ 	*  and we fill in the p_info struct and use copy_to_user to
+ 	*  send it back to user space.
+ 	*  Put semaphores around it for safety */
 	down(&dev->sem);
-
+	
 	if(dev->minor == 2){
+	
 		if(copy_from_user(&message, buf, count)){
 			errno = -EFAULT;
 		}
@@ -282,7 +297,7 @@ static int __init kernellab_init(void)
 	if ((err = setup_devices()) < 0)
 		goto out3;
 	
-	
+		
 	pr_info("kernellab: module INJECTED");
 		
 			
